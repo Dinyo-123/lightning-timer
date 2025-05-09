@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Lightning Timer</title>
+
+  <!-- iOS standalone support -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Lightning Timer">
+
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@800&display=swap" rel="stylesheet">
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    html, body { height:100%; margin:0; }
+    body {
+      display:flex; align-items:center; justify-content:center;
+      cursor:pointer; transition:background-color .3s, color .3s;
+      flex-direction:column; position:relative;
+      font-family:'Poppins',sans-serif;
+    }
+    /* States */
+    body.waiting { background:#e0e0e0; color:#000; }
+    body.timing { background:#4caf50; color:#fff; }
+    body.result { background:#f44336; color:#fff; }
+    /* Message */
+    #message { font-weight:800; font-size:2.5rem; user-select:none; text-align:center; margin-top:40px; }
+    #message span { display:block; margin-top:.5em; font-size:1.2rem; opacity:.8; }
+    /* Map box */
+    #map-container {
+      width:80vw;
+      max-width:600px;
+      height:60vh;
+      max-height:700px;
+      margin-top:20px;
+      border:2px solid currentColor;
+      border-radius:8px;
+      overflow:hidden;
+      display:none;
+      z-index:5;
+    }
+    #map { width:100%; height:100%; }
+    /* Buttons */
+    button {
+      position:absolute; padding:.4rem .8rem; font-weight:800;
+      border:none; border-radius:.3rem; cursor:pointer; transition:background .3s;
+      z-index:10; font-family:'Poppins',sans-serif;
+    }
+    #fs-btn { top:20px; left:20px; }
+    #settings-btn { top:20px; right:20px; font-size:1.5rem; }
+    body.waiting #fs-btn { background:rgba(255,255,255,.7); color:#000; }
+    body.timing #fs-btn, body.result #fs-btn { background:rgba(0,0,0,.3); color:#fff; }
+    #fs-btn:hover { background:rgba(0,0,0,.5); }
+    /* Settings dropdown */
+    #settings-menu {
+      position:absolute; top:55px; right:20px; background:rgba(255,255,255,.95);
+      border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,.15);
+      padding:10px; opacity:0; transform:translateY(-10px);
+      pointer-events:none; transition:opacity .3s, transform .3s;
+      z-index:10;
+    }
+    #settings-menu.open { opacity:1; transform:translateY(0); pointer-events:auto; }
+    .setting { display:flex; align-items:center; justify-content:space-between;
+      color:#333; font-size:1rem;
+    }
+    .setting input { width:40px; height:24px; position:relative; -webkit-appearance:none;
+      background:#ccc; border-radius:12px; outline:none; transition:background .2s;
+    }
+    .setting input:checked { background:#4caf50; }
+    .setting input:before {
+      content:''; position:absolute; width:20px; height:20px; top:2px; left:2px;
+      background:#fff; border-radius:50%; transition:transform .2s;
+    }
+    .setting input:checked:before { transform:translateX(16px); }
+  </style>
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+</head>
+<body class="waiting">
+  <button id="fs-btn">Fullscreen</button>
+  <button id="settings-btn">⋮</button>
+  <div id="settings-menu">
+    <label class="setting">Show Map
+      <input type="checkbox" id="map-switch">
+    </label>
+  </div>
+  <div id="message">Click when you see lightning</div>
+  <div id="map-container"><div id="map"></div></div>
+<script>
+  let state='waiting', startTime=0, raf, lastD=0;
+  let map, coords, initialized=false;
+  const body=document.body, msg=document.getElementById('message');
+  const fsBtn=document.getElementById('fs-btn');
+  const settingsBtn=document.getElementById('settings-btn');
+  const menu=document.getElementById('settings-menu');
+  const mapSwitch=document.getElementById('map-switch');
+  const mapContainer=document.getElementById('map-container');
+
+  // Body click handles timer state
+  body.addEventListener('click', ()=>{
+    if(state==='waiting') startTiming();
+    else if(state==='timing') stopTiming();
+    else reset();
+  });
+
+  // Fullscreen button
+  fsBtn.addEventListener('click', e=>{ e.stopPropagation();
+    if(!document.fullscreenElement) document.documentElement.requestFullscreen();
+    else document.exitFullscreen();
+  });
+  document.addEventListener('fullscreenchange', ()=>{
+    fsBtn.textContent = document.fullscreenElement ? 'Exit Fullscreen' : 'Fullscreen';
+  });
+
+  // Settings toggle
+  settingsBtn.addEventListener('click', e=>{ e.stopPropagation(); menu.classList.toggle('open'); });
+  menu.addEventListener('click', e=> e.stopPropagation());
+
+  // Map switch listener
+  mapSwitch.addEventListener('change', ()=>{
+    if(mapSwitch.checked) initMap();
+    else mapContainer.style.display='none';
+  });
+
+  // Prevent clicks inside map resetting timer
+  mapContainer.addEventListener('mousedown', e=> e.stopPropagation());
+  mapContainer.addEventListener('click', e=> e.stopPropagation());
+
+  function updateTimer(){
+    const t=(performance.now()-startTime)/1000;
+    msg.textContent = t.toFixed(3);
+    raf = requestAnimationFrame(updateTimer);
+  }
+  function startTiming(){
+    state='timing'; body.className='timing'; startTime=performance.now(); updateTimer();
+  }
+  function stopTiming(){
+    state='result'; cancelAnimationFrame(raf);
+    const t=(performance.now()-startTime)/1000;
+    lastD = t * 343;
+    body.className='result';
+    msg.innerHTML = `Distance: ${lastD.toFixed(1)} m<span>Time: ${t.toFixed(3)} s</span>`;
+    if(mapSwitch.checked) showCircle();
+  }
+  function reset(){
+    state='waiting'; body.className='waiting'; msg.textContent='Click when you see lightning';
+    // Keep map visible if switch still on
+    if(mapSwitch.checked) mapContainer.style.display='block';
+    else mapContainer.style.display='none';
+  }
+
+  function initMap(){
+    if(!initialized){
+      if(!navigator.geolocation){ alert('Geolocation not supported'); mapSwitch.checked=false; return; }
+      navigator.geolocation.getCurrentPosition(pos=>{
+        coords=[pos.coords.latitude,pos.coords.longitude];
+        map = L.map('map',{zoomControl:false}).setView(coords,13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'&copy; OpenStreetMap contributors'}).addTo(map);
+        initialized = true;
+        mapContainer.style.display='block';
+        map.invalidateSize();
+        showCircle();
+      }, ()=>{ alert('Unable to retrieve location'); mapSwitch.checked=false; });
+    } else {
+      mapContainer.style.display='block';
+      map.invalidateSize();
+      showCircle();
+    }
+  }
+  function showCircle(){
+    if(map && coords){
+      if(window.circle) map.removeLayer(window.circle);
+      window.circle = L.circle(coords,{radius:lastD,color:'blue',fillColor:'blue',fillOpacity:0.2}).addTo(map);
+      map.fitBounds(window.circle.getBounds());
+    }
+  }
+</script>
+</body>
+</html>
